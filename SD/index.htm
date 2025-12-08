@@ -3022,8 +3022,9 @@
                     HTML += buttonDisabled ? "disabled>" : ">";
                     HTML += uploader.status == "running" ? "Stop" : "Start";
                     HTML += "</button><span> " + uploader.id + ":</span>";
-                    HTML += "<span> " + (uploader.status == "running" ? "Running" : "Stopped"); 
-                    HTML += ", Last update " + formatDateTime(uploader.lastpost) + "</span>";
+                    HTML += "<span> " + (uploader.status == "running" ? "Running" : "Stopped");
+                    var lastUpdate = uploader.lastpost ? formatDateTime(uploader.lastpost) : "unavailable";
+                    HTML += ", Last update " + lastUpdate + "</span>";
                     if(uploader.message){
                        HTML += "<span><br>" + uploader.message + "</span>";  
                     }
