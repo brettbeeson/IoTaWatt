@@ -14,8 +14,8 @@ class postgrest_uploader : public Uploader
             _table(0),
             _deviceName(0),
             _jwtToken(0),
-            _schema(0)
-            // _GETrequest(0)
+            _schema(0),
+            _merge_duplicates(false)
         {
             _id = charstar("postgrest");
         };
@@ -38,7 +38,8 @@ class postgrest_uploader : public Uploader
         char *_deviceName;      // Device identifier (supports $device substitution)
         char *_jwtToken;        // JWT token for authentication
         char *_schema;          // Database schema name
-        
+        bool _merge_duplicates; // Add Prefer: resolution=merge-duplicates header
+
         // struct GETrequest{
         //     char*   endpoint;
         //     states  completionState;

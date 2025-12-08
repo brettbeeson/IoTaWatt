@@ -36,44 +36,27 @@ bool postgrest_uploader::configCB(JsonObject &Json)
         return false;
     }
 
-    if (Json.containsKey("deviceName"))
-    {
-        delete[] _deviceName;
-        _deviceName = charstar(Json["deviceName"].as<char *>());
-    }
-    else
-    {
-        delete[] _deviceName;
-        _deviceName = charstar("$device");
-    }
+    delete[] _deviceName;
+    _deviceName = charstar(Json["deviceName"] | "$device");
 
-    if (Json.containsKey("schema"))
-    {
-        delete[] _schema;
-        _schema = charstar(Json["schema"].as<char *>());
-    }
-    else
-    {
-        delete[] _schema;
-        _schema = charstar("public");
-    }
+    delete[] _schema;
+    _schema = charstar(Json["schema"] | "public");
 
+    delete[] _jwtToken;
+    _jwtToken = nullptr;
     if (Json.containsKey("jwtToken"))
     {
-        delete[] _jwtToken;
         _jwtToken = charstar(Json["jwtToken"].as<char *>());
     }
 
+    _merge_duplicates = Json["mergeDupes"] | false;
+
     // Log successful configuration with key details
-    if (_jwtToken)
-    {
-        log("%s: Configured for table %s.%s with JWT auth", _id, _schema, _table);
-    }
-    else
-    {
-        log("%s: Configured for table %s.%s (anonymous)", _id, _schema, _table);
-    }
-    
+
+    log("%s: Configured for table %s.%s %s %s", _id, _schema, _table,
+                 _jwtToken ? "with JWT auth" : "(anonymous)",
+                _merge_duplicates ? "merge duplicates" : "" );
+            
     // sort the measurements by name so they can be combined into single entries
 
     _outputs->sort([this](Script* a, Script* b)->int {
@@ -419,8 +402,9 @@ void postgrest_uploader::setRequestHeaders()
 {
     _request->setReqHeader("Content-Type", "application/json");
     _request->setReqHeader("Accept", "application/json");
-    _request->setReqHeader("Prefer", "return=minimal");
-
+    String prefer = "return=minimal" + _merge_duplicates ? ", resolution=merge-duplicates" : "";
+    _request->setReqHeader("Prefer", prefer.c_str());
+    
     if (_jwtToken)
     {
         String auth = "Bearer ";
