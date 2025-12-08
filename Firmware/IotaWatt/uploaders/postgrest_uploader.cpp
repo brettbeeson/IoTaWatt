@@ -73,6 +73,12 @@ bool postgrest_uploader::configCB(JsonObject &Json)
     {
         log("%s: Configured for table %s.%s (anonymous)", _id, _schema, _table);
     }
+    
+    // sort the measurements by name so they can be combined into single entries
+
+    _outputs->sort([this](Script* a, Script* b)->int {
+        return strcmp(a->name(), b->name());
+    });
 
     return true;
 }
@@ -145,7 +151,6 @@ uint32_t postgrest_uploader::parseTimestamp(const char *timestampStr)
  ***************************************************************************************/
 uint32_t postgrest_uploader::handle_query_s()
 {
-
     String endpoint = "/";
     if (_schema && strcmp(_schema, "public") != 0)
     {
@@ -215,28 +220,11 @@ uint32_t postgrest_uploader::handle_checkQuery_s()
             if (timestamp > 0)
             {
                 _lastSent = timestamp;
-                if (_lastSent >= MAX(Current_log.firstKey(), _uploadStartDate))
-                {
-                    // Clean up successful request
-                    delete _request;
-                    _request = nullptr;
-                    _state = write_s;
-                    return 1;
-                }
             }
         }
     }
-
-    // No valid timestamp found, start from configured beginning
-    if (_uploadStartDate)
-    {
-        _lastSent = _uploadStartDate;
-    }
-    else
-    {
-        _lastSent = Current_log.firstKey();
-    }
-
+    
+    _lastSent = MAX(_lastSent, _uploadStartDate);
     _lastSent = MAX(_lastSent, Current_log.firstKey());
     _lastSent -= _lastSent % _interval;
 
@@ -301,7 +289,7 @@ uint32_t postgrest_uploader::handle_write_s()
         if (micros() > bingoTime)
         {
             // Don't hog the CPU
-            return 10;
+            return 10; 
         }
 
         IotaLogRecord *swap = oldRecord;
@@ -321,53 +309,30 @@ uint32_t postgrest_uploader::handle_write_s()
         }
 
         // Format timestamp as UTC-with-a-TZ for PostgreSQL TIMESTAMPTZ
+
         String timestampStr = datef(oldRecord->UNIXtime, "YYYY-MM-DD hh:mm:ss+00:00");
 
+        // Process the output scripts and build Json rows combining all units for each sensor.
+
         Script *script = _outputs->first();
+        String sensor;
         while (script)
         {
             double value = script->run(oldRecord, newRecord);
-            if (value == value)
-            {
-                if (reqData.available() > 1)
+            if (value == value){
+                if( ! sensor.equals(script->name()))
                 {
-                    reqData.print(",");
+                    sensor = script->name();
+                    if (reqData.available() > 1)
+                    {
+                        reqData.print("},\n");
+                    }
+                    reqData.printf("{\"timestamp\":\"%s\",\"device\":\"%s\",\"sensor\":\"%s\"",
+                        timestampStr.c_str(),
+                        resolveDeviceName().c_str(),
+                        script->name());
                 }
-
-                reqData.printf("{\"timestamp\":\"%s\",\"device\":\"%s\",\"sensor\":\"%s\"",
-                               timestampStr.c_str(),
-                               resolveDeviceName().c_str(),
-                               script->name());
-
-                // Map units to database columns
-                const char *units = script->getUnits();
-                if (strcmp(units, "Watts") == 0 || strcmp(units, "Wh") == 0 || strcmp(units, "kWh") == 0)
-                {
-                    reqData.printf(",\"power\":%.*f,\"pf\":null,\"current\":null,\"v\":null",
-                                   script->precision(), value);
-                }
-                else if (strcmp(units, "PF") == 0)
-                {
-                    reqData.printf(",\"power\":null,\"pf\":%.*f,\"current\":null,\"v\":null",
-                                   script->precision(), value);
-                }
-                else if (strcmp(units, "Amps") == 0)
-                {
-                    reqData.printf(",\"power\":null,\"pf\":null,\"current\":%.*f,\"v\":null",
-                                   script->precision(), value);
-                }
-                else if (strcmp(units, "Volts") == 0)
-                {
-                    reqData.printf(",\"power\":null,\"pf\":null,\"current\":null,\"v\":%.*f",
-                                   script->precision(), value);
-                }
-                else
-                {
-                    // Skip unsupported units
-                    script = script->next();
-                    continue;
-                }
-                reqData.print("}");
+                reqData.printf(",\"%s\":%.*f", script->getUnits(), script->precision(), value);
             }
             script = script->next();
         }
@@ -385,7 +350,7 @@ uint32_t postgrest_uploader::handle_write_s()
         return UTCtime() + 5;
     }
 
-    reqData.print("]");
+    reqData.print("}]");
 
     delete oldRecord;
     oldRecord = nullptr;
@@ -439,6 +404,7 @@ uint32_t postgrest_uploader::handle_checkWrite_s()
     }
 
     // Deal with failure - follow InfluxDB v1 pattern
+
     char msg[100];
     sprintf_P(msg, PSTR("Post failed %d"), _request->responseHTTPcode());
     delete[] _statusMessage;
