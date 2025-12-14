@@ -51,7 +51,7 @@ Script::Script(JsonObject& JsonScript)
       _units = Watts;
       var = JsonScript["units"];
       if(var.success()){
-        for(int i=0; i<unitsNone; i++){
+        for(int i=0; i<unitsCount; i++){
           if(strcmp_ci(var.as<char*>(),unitstr[i]) == 0){
             _units = (units)i;
             break;
@@ -79,7 +79,7 @@ Script::Script(const char* name, const char* unit, const char* script)
     {
       _name = charstar(name);
 
-       for(int i=0; i<unitsNone; i++){
+       for(int i=0; i<unitsCount; i++){
           if(strcmp_ci(unit,unitstr[i]) == 0){
             _units = (units)i;
             break;
@@ -267,7 +267,7 @@ bool    Script::encodeScript(const char* script){
 }
 
 double  Script::run(IotaLogRecord* oldRec, IotaLogRecord* newRec, const char* overideUnits){
-        for(int i=0; i<unitsNone; i++){
+        for(int i=0; i<unitsCount; i++){
           if(strcmp_ci(overideUnits,unitstr[i]) == 0){
             return run(oldRec, newRec, (units) i);
           } 
