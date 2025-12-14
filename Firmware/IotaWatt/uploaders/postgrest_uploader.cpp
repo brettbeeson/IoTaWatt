@@ -25,6 +25,7 @@
  ***************************************************************************************/
 bool postgrest_uploader::configCB(JsonObject &Json)
 {
+    trace(T_postgrest, 90);
     if (Json.containsKey("table"))
     {
         delete[] _table;
@@ -49,20 +50,23 @@ bool postgrest_uploader::configCB(JsonObject &Json)
         _jwtToken = charstar(Json["jwtToken"].as<char *>());
     }
 
-    _merge_duplicates = Json["mergeDupes"] | false;
+    _merge_duplicates = Json["mergeDups"] | false;
 
     // Log successful configuration with key details
 
+    trace(T_postgrest, 90, 3);    
     log("%s: Configured for table %s.%s %s %s", _id, _schema, _table,
                  _jwtToken ? "with JWT auth" : "(anonymous)",
                 _merge_duplicates ? "merge duplicates" : "" );
             
     // sort the measurements by name so they can be combined into single entries
 
+    trace(T_postgrest, 90, 5);    
     _outputs->sort([this](Script* a, Script* b)->int {
         return strcmp(a->name(), b->name());
     });
 
+    trace(T_postgrest, 90, 9);    
     return true;
 }
 
@@ -134,6 +138,8 @@ uint32_t postgrest_uploader::parseTimestamp(const char *timestampStr)
  ***************************************************************************************/
 uint32_t postgrest_uploader::handle_query_s()
 {
+    trace(T_postgrest, 10);
+    _lastSent = 0;
     String endpoint = "/";
     if (_schema && strcmp(_schema, "public") != 0)
     {
@@ -150,7 +156,9 @@ uint32_t postgrest_uploader::handle_query_s()
         return UTCtime() + 1;
     }
 
+    trace(T_postgrest, 10,1);
     HTTPGet(endpoint.c_str(), checkQuery_s);
+    trace(T_postgrest, 10,2);
     return 1;
 }
 
@@ -160,25 +168,30 @@ uint32_t postgrest_uploader::handle_query_s()
 uint32_t postgrest_uploader::handle_checkQuery_s()
 {
 
+    trace(T_postgrest, 20);
     // Check if async request is complete
     if (!_request || _request->readyState() != 4)
     {
         return 10;
     }
 
+    delete[] _statusMessage;
+    _statusMessage = nullptr;
+
     int httpCode = _request->responseHTTPcode();
     String responseText = _request->responseText();
-
+    trace(T_postgrest, 20,1);
     if (httpCode != 200)
     {
-        char message[100];
+        trace(T_postgrest, 20, 2);
+        char message[responseText.length()+50];
         if (httpCode < 0)
         {
-            sprintf_P(message, PSTR("Query failed, code %d"), httpCode);
+            snprintf_P(message, 50, PSTR("Query failed, code %d"), httpCode);
         }
         else
         {
-            sprintf_P(message, PSTR("Query failed, code %d, response: %.50s"), httpCode, responseText.c_str());
+            snprintf_P(message, responseText.length()+50, PSTR("Query failed, code %d, response: %s"), httpCode, responseText.c_str());
         }
         _statusMessage = charstar(message);
 
@@ -190,11 +203,13 @@ uint32_t postgrest_uploader::handle_checkQuery_s()
         return 15;
     }
 
+    trace(T_postgrest, 20, 3);
     DynamicJsonBuffer JsonBuffer;
     JsonArray &jsonArray = JsonBuffer.parseArray(responseText);
 
     if (jsonArray.success() && jsonArray.size() > 0)
     {
+        trace(T_postgrest, 20, 4);    
         JsonObject &lastRecord = jsonArray[0];
         if (lastRecord.containsKey("timestamp"))
         {
@@ -207,6 +222,7 @@ uint32_t postgrest_uploader::handle_checkQuery_s()
         }
     }
     
+    trace(T_postgrest, 20, 5);
     _lastSent = MAX(_lastSent, _uploadStartDate);
     _lastSent = MAX(_lastSent, Current_log.firstKey());
     _lastSent -= _lastSent % _interval;
@@ -220,6 +236,7 @@ uint32_t postgrest_uploader::handle_checkQuery_s()
     delete _request;
     _request = nullptr;
     _state = write_s;
+    trace(T_postgrest, 20, 6);
     return 1;
 }
 
@@ -348,7 +365,7 @@ uint32_t postgrest_uploader::handle_write_s()
     }
     endpoint += _table;
 
-    HTTPPost(endpoint.c_str(), checkWrite_s, "application/json");
+HTTPPost(endpoint.c_str(), checkWrite_s, "application/json");
     return 1;
 }
 
@@ -372,26 +389,34 @@ uint32_t postgrest_uploader::handle_checkWrite_s()
         return UTCtime() + 10;
     }
 
-    int httpCode = _request->responseHTTPcode();
-    String responseText = _request->responseText();
-
+    delete[] _statusMessage;
+    _statusMessage = nullptr;
+    
     // PostgREST returns 201 for successful inserts (vs InfluxDB's 204)
-    if (_request->responseHTTPcode() == 201)
-    {
 
-        delete[] _statusMessage;
-        _statusMessage = nullptr;
+    int httpCode = _request->responseHTTPcode();
+    if (httpCode == 201)
+    {
         _lastSent = _lastPost;
         _state = write_s;
         return 1;
     }
+    
+    String responseText = _request->responseText();
+    char message[responseText.length()+50];
+    if (httpCode < 0)
+    {
+        snprintf_P(message, 50, PSTR("POST failed, code %d"), httpCode);
+    }
+    else
+    {
+        snprintf_P(message, responseText.length()+50, PSTR("POST failed, code %d, response: %s"), httpCode, responseText.c_str());
+    }
+    _statusMessage = charstar(message);
 
+        
     // Deal with failure - follow InfluxDB v1 pattern
-
-    char msg[100];
-    sprintf_P(msg, PSTR("Post failed %d"), _request->responseHTTPcode());
-    delete[] _statusMessage;
-    _statusMessage = charstar(msg);
+    
     delete _request;
     _request = nullptr;
     _state = write_s;
@@ -400,9 +425,11 @@ uint32_t postgrest_uploader::handle_checkWrite_s()
 
 void postgrest_uploader::setRequestHeaders()
 {
-    _request->setReqHeader("Content-Type", "application/json");
     _request->setReqHeader("Accept", "application/json");
-    String prefer = "return=minimal" + _merge_duplicates ? ", resolution=merge-duplicates" : "";
+    String prefer = "return=minimal";
+    if(_merge_duplicates) {
+        prefer += ", resolution=merge-duplicates";
+    }
     _request->setReqHeader("Prefer", prefer.c_str());
     
     if (_jwtToken)
