@@ -636,19 +636,21 @@ void handleStatus(){
       histlog.set(F("interval"),History_log.interval());
       datalogs.add(histlog);
 
-      trace(T_WEB,18,3);  
-      Script *script = integrations->first();
-      while(script){
-        IotaLog *log = ((integrator *)script->getParm())->get_log();
-        JsonObject& intlog = jsonBuffer.createObject();
-        intlog.set(F("id"), script->name());
-        intlog.set(F("firstkey"),log->firstKey());
-        intlog.set(F("lastkey"),log->lastKey());
-        intlog.set(F("size"),log->fileSize());
-        intlog.set(F("interval"),log->interval());
-        datalogs.add(intlog);
-        script = script->next();
-      }
+      trace(T_WEB,18,3);
+      if(integrations){  
+        Script *script = integrations->first();
+        while(script){
+          IotaLog *log = ((integrator *)script->getParm())->get_log();
+          JsonObject& intlog = jsonBuffer.createObject();
+          intlog.set(F("id"), script->name());
+          intlog.set(F("firstkey"),log->firstKey());
+          intlog.set(F("lastkey"),log->lastKey());
+          intlog.set(F("size"),log->fileSize());
+          intlog.set(F("interval"),log->interval());
+          datalogs.add(intlog);
+          script = script->next();
+        }
+    }
 
       trace(T_WEB,18,4);
       root.set(F("datalogs"),datalogs);
