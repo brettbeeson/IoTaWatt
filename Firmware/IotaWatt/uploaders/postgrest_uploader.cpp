@@ -8,14 +8,22 @@
  * PostgREST provides automatic RESTful endpoints for PostgreSQL tables.
  *
  * Expected database schema:
- * CREATE TABLE iotawatt (
+ * 
+ * CREATE TABLE <your table name> (
  *   timestamp TIMESTAMPTZ NOT NULL,
  *   device TEXT NOT NULL,
  *   sensor TEXT NOT NULL,
- *   power DOUBLE PRECISION,
- *   pf DOUBLE PRECISION,
- *   current DOUBLE PRECISION,
- *   v DOUBLE PRECISION
+ * 
+ *   One or more of the following:
+ * 
+ *   Watts  DOUBLE PRECISION,
+ *   Amps   DOUBLE PRECISION,
+ *   PF     DOUBLE PRECISION,
+ *   VA     DOUBLE PRECISION,
+ *   VAR    DOUBLE PRECISION,
+ *   Volts  DOUBLE PRECISION,
+ *   Hz     DOUBLE PRECISION,    
+ *      
  * );
  *
  ***************************************************************************************/
@@ -42,6 +50,11 @@ bool postgrest_uploader::configCB(JsonObject &Json)
 
     delete[] _schema;
     _schema = charstar(Json["schema"] | "public");
+    if(!strlen(_schema))
+    {
+        delete[] _schema;
+        _schema = charstar("public");
+    }
 
     delete[] _jwtToken;
     _jwtToken = nullptr;
@@ -49,9 +62,22 @@ bool postgrest_uploader::configCB(JsonObject &Json)
     {
         _jwtToken = charstar(Json["jwtToken"].as<char *>());
     }
-
-    // Create list of units used.
-
+    
+    // sort the measurements by name then units so they can be combined into single rows
+    
+    trace(T_postgrest, 90, 5);    
+    _outputs->sort([this](Script* a, Script* b)->int {
+        int comp = strcmp(a->name(), b->name());
+        if(comp)
+        {
+            return comp;
+        }
+        return a->getUnitsEnum() - b->getUnitsEnum();
+    });
+    
+        // Create list of units used.
+    
+    trace(T_postgrest, 90, 6);
     for (int i = 0; i < unitsCount; i++)
     {
         _unit_active[i] = false;
@@ -73,25 +99,13 @@ bool postgrest_uploader::configCB(JsonObject &Json)
     }
     delete[] _CSVheader;
     _CSVheader = charstar(CSVheader);
-
+    
     // Log successful configuration with key details
-
-    trace(T_postgrest, 90, 3);
+    
+    trace(T_postgrest, 90, 7);
     log("%s: Configured for table %s.%s %s", _id, _schema, _table,
         _jwtToken ? "with JWT auth" : "(anonymous)");
-
-    // sort the measurements by name then units so they can be combined into single rows
-
-    trace(T_postgrest, 90, 5);    
-    _outputs->sort([this](Script* a, Script* b)->int {
-        int comp = strcmp(a->name(), b->name());
-        if(comp)
-        {
-            return comp;
-        }
-        return a->getUnitsEnum() - b->getUnitsEnum();
-    });
-
+        
     trace(T_postgrest, 90, 9);    
     return true;
 }
@@ -337,7 +351,7 @@ uint32_t postgrest_uploader::handle_write_s()
 
         // Format timestamp as UTC-with-a-TZ for PostgreSQL TIMESTAMPTZ
 
-        String timestampStr = datef(oldRecord->UNIXtime, "YYYY-MM-DD hh:mm:ss+00:00");
+        String timestampStr = datef(oldRecord->UNIXtime, "YYYY-MM-DDThh:mm:ssZ");
 
         // Process the output scripts and build sensor rows with all requested units.
 
