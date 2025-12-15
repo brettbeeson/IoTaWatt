@@ -226,7 +226,7 @@ uint32_t HTTPlock = 0;                      // Time(ms) HTTP was locked (no new 
 char *HTTPSproxy = nullptr;
 
 int32_t uploaderBufferLimit = 3000;          // Dynamic limit to try to control overload during recovery
-int32_t uploaderBufferTotal = 6000;          // Total aggregate target of uploader buffers       
+int32_t uploaderBufferTotal = 8000;          // Total aggregate target of uploader buffers       
 
 // ****************************** Timing and time data **********************************
 
