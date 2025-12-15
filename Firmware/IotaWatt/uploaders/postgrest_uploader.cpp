@@ -50,20 +50,46 @@ bool postgrest_uploader::configCB(JsonObject &Json)
         _jwtToken = charstar(Json["jwtToken"].as<char *>());
     }
 
-    _merge_duplicates = Json["mergeDups"] | false;
+    // Create list of units used.
+
+    for (int i = 0; i < unitsCount; i++)
+    {
+        _unit_active[i] = false;
+    }
+    Script *script = _outputs->first();
+    while(script)
+    {
+        _unit_active[script->getUnitsEnum()] = true;
+        script = script->next();
+    }
+    String CSVheader = "timestamp,device,sensor";
+    for (int i = 0; i < unitsCount; i++)
+    {
+        if(_unit_active[i])
+        {
+            CSVheader += ',';
+            CSVheader += unitstr[i];
+        }
+    }
+    delete[] _CSVheader;
+    _CSVheader = charstar(CSVheader);
 
     // Log successful configuration with key details
 
-    trace(T_postgrest, 90, 3);    
-    log("%s: Configured for table %s.%s %s %s", _id, _schema, _table,
-                 _jwtToken ? "with JWT auth" : "(anonymous)",
-                _merge_duplicates ? "merge duplicates" : "" );
-            
-    // sort the measurements by name so they can be combined into single entries
+    trace(T_postgrest, 90, 3);
+    log("%s: Configured for table %s.%s %s", _id, _schema, _table,
+        _jwtToken ? "with JWT auth" : "(anonymous)");
+
+    // sort the measurements by name then units so they can be combined into single rows
 
     trace(T_postgrest, 90, 5);    
     _outputs->sort([this](Script* a, Script* b)->int {
-        return strcmp(a->name(), b->name());
+        int comp = strcmp(a->name(), b->name());
+        if(comp)
+        {
+            return comp;
+        }
+        return a->getUnitsEnum() - b->getUnitsEnum();
     });
 
     trace(T_postgrest, 90, 9);    
@@ -248,6 +274,7 @@ uint32_t postgrest_uploader::handle_checkQuery_s()
  ***************************************************************************************/
 uint32_t postgrest_uploader::handle_write_s()
 {
+    trace(T_postgrest, 30);
     if (_stop)
     {
         stop();
@@ -270,7 +297,6 @@ uint32_t postgrest_uploader::handle_write_s()
 
     if (!oldRecord)
     {
-        // swap old and new records to reduce SD card reads
         oldRecord = new IotaLogRecord;
         newRecord = new IotaLogRecord;
         newRecord->UNIXtime = _lastSent + _interval;
@@ -279,12 +305,13 @@ uint32_t postgrest_uploader::handle_write_s()
 
     if (reqData.available() == 0)
     {
-        reqData.print("[");
+        reqData.print(_CSVheader);
     }
 
     while (reqData.available() < uploaderBufferLimit &&
            newRecord->UNIXtime < Current_log.lastKey())
     {
+        trace(T_postgrest,30,1);
 
         if (micros() > bingoTime)
         {
@@ -312,34 +339,88 @@ uint32_t postgrest_uploader::handle_write_s()
 
         String timestampStr = datef(oldRecord->UNIXtime, "YYYY-MM-DD hh:mm:ss+00:00");
 
-        // Process the output scripts and build Json rows combining all units for each sensor.
+        // Process the output scripts and build sensor rows with all requested units.
 
+        trace(T_postgrest,30,3);    
         Script *script = _outputs->first();
-        String sensor;
-        while (script)
-        {
-            double value = script->run(oldRecord, newRecord);
-            if (value == value){
-                if( ! sensor.equals(script->name()))
-                {
-                    sensor = script->name();
-                    if (reqData.available() > 1)
-                    {
-                        reqData.print("},\n");
-                    }
-                    reqData.printf("{\"timestamp\":\"%s\",\"device\":\"%s\",\"sensor\":\"%s\"",
+        String sensor = script->name();
+        reqData.printf("\n%s,%s,%s",
                         timestampStr.c_str(),
                         resolveDeviceName().c_str(),
-                        script->name());
+                        sensor.c_str());
+        int unitIndex = 0;
+
+        trace(T_postgrest,30,4);    
+        while (script)
+        {
+            trace(T_postgrest,30,6);
+            double value = script->run(oldRecord, newRecord);
+            if (value == value){
+
+                // If sensor changed
+
+                if( ! sensor.equals(script->name()))
+                {
+                    trace(T_postgrest,30,7);
+
+                    // Finish row.
+
+                    while(unitIndex < unitsCount)
+                    {
+                       if(_unit_active[unitIndex++])
+                       {
+                           reqData.print(",NULL");
+                       } 
+                    }
+
+                    // Start a new row
+
+                    sensor = script->name();
+                    reqData.printf("\n%s,%s,%s",
+                        timestampStr.c_str(),
+                        resolveDeviceName().c_str(),
+                        sensor.c_str());
+                    unitIndex = 0;
                 }
-                reqData.printf(",\"%s\":%.*f", script->getUnits(), script->precision(), value);
+                trace(T_postgrest,30,8);
+
+                // Fill null units
+
+                while(unitIndex < script->getUnitsEnum())
+                {
+                    if(_unit_active[unitIndex++])
+                       {
+                           reqData.print(",NULL");
+                       } 
+                }
+
+                // Output this script value if appropriate (ignores a duplicate unit).
+
+                if(unitIndex == script->getUnitsEnum())
+                {
+                    trace(T_postgrest,30,9);
+                    reqData.printf(",%.*f", script->precision(), value);
+                    unitIndex++;
+                }
             }
             script = script->next();
         }
 
+        // Finish row.
+
+        trace(T_postgrest,30,10);    
+        while(unitIndex < unitsCount)
+        {
+            if(_unit_active[unitIndex++])
+            {
+                reqData.print(",NULL");
+            } 
+        }
+        
         _lastPost = oldRecord->UNIXtime;
     }
-
+    reqData.print('\n');
+    
     if (reqData.available() <= 1)
     {
         reqData.flush();
@@ -349,14 +430,12 @@ uint32_t postgrest_uploader::handle_write_s()
         newRecord = nullptr;
         return UTCtime() + 5;
     }
-
-    reqData.print("}]");
-
+    
     delete oldRecord;
     oldRecord = nullptr;
     delete newRecord;
     newRecord = nullptr;
-
+    
     String endpoint = "/";
     if (_schema && strcmp(_schema, "public") != 0)
     {
@@ -364,8 +443,9 @@ uint32_t postgrest_uploader::handle_write_s()
         endpoint += ".";
     }
     endpoint += _table;
-
-HTTPPost(endpoint.c_str(), checkWrite_s, "application/json");
+    
+    trace(T_postgrest,30,11);
+    HTTPPost(endpoint.c_str(), checkWrite_s, "text/csv");
     return 1;
 }
 
@@ -425,13 +505,7 @@ uint32_t postgrest_uploader::handle_checkWrite_s()
 
 void postgrest_uploader::setRequestHeaders()
 {
-    _request->setReqHeader("Accept", "application/json");
     String prefer = "return=minimal";
-    if(_merge_duplicates) {
-        prefer += ", resolution=merge-duplicates";
-    }
-    _request->setReqHeader("Prefer", prefer.c_str());
-    
     if (_jwtToken)
     {
         String auth = "Bearer ";
