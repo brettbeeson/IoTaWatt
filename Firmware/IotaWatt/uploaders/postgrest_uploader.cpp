@@ -50,9 +50,8 @@ bool postgrest_uploader::configCB(JsonObject &Json)
 
     delete[] _schema;
     _schema = charstar(Json["schema"] | "public");
-    if(!strlen(_schema))
+    if(!_schema)
     {
-        delete[] _schema;
         _schema = charstar("public");
     }
 
