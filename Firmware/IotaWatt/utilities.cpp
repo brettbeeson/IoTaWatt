@@ -30,19 +30,19 @@ char* charstar(const __FlashStringHelper * str1, const char *str2){
 }
 
 char* charstar(const char* str1, const char *str2){
-    int len1 = str1 ? strlen(str1) : 0;
-    int len2 = str2 ? strlen(str2) : 0;
+  int len1 = str1 ? strlen(str1) : 0;
+  int len2 = str2 ? strlen(str2) : 0;
+  if(len1 + len2){
     char* ptr = new char[len1 + len2 +1];
-    *ptr = 0;
-    if(len1 + len2){
-        if(str1){
-            strcpy(ptr, str1);
-        }
-        if(str2){
-            strcpy(ptr + len1, str2);
-        }  
+    if(str1){
+        strcpy(ptr, str1);
     }
+    if(str2){
+        strcpy(ptr + len1, str2);
+    }  
     return ptr;
+  }
+  return nullptr;
 }
 
 char* charstar(String str){
