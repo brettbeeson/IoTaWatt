@@ -7,6 +7,7 @@
 
 // Following enumeration must match unitstr[] in .cpp.
 
+extern const char *unitstr[];
 enum units     // Must match unitstr[] in .cpp
 {           
   Watts = 0,
@@ -62,9 +63,10 @@ class Script {
     Script(const char* name, const char* units, const char* script); 
     ~Script();
 
-    const char*   name();     // name associated with this Script
-    const char*   getUnits();    // units associated with this Script
-    void    setUnits(const char*);
+    const char *name();     // name associated with this Script
+    const char *getUnits(); // units associated with this Script
+    int         getUnitsEnum() { return _units; }
+
     void    setParm(void*);      // Set parm value
     void*   getParm();           // Retrieve parm value
     Script* next();           // -> next Script in set
